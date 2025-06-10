@@ -2,38 +2,30 @@ import pandas as pd
 import numpy as np
 import ta
 
-# === Step 1: Load Data ===
 df = pd.read_excel("btc_data.xlsx")
 df['Date'] = pd.to_datetime(df['Date'], dayfirst=True)
 df.set_index('Date', inplace=True)
 df = df.sort_index()
 
-# === Step 2: Indicators ===
-# Daily EMA 13
 df['EMA_13_D'] = df['Close'].ewm(span=13).mean()
 df['EMA_13_D_prev'] = df['EMA_13_D'].shift(1)
 
-# Weekly EMA 13 (resampled & forward-filled)
 df['EMA_13_W'] = df['Close'].resample('W').last().ewm(span=13).mean().reindex(df.index, method='ffill')
 df['EMA_13_W_prev'] = df['EMA_13_W'].shift(1)
 
-# Daily MACD Histogram
 macd = ta.trend.MACD(df['Close'])
 df['MACD_HIST_D'] = macd.macd_diff()
 df['MACD_HIST_D_prev'] = df['MACD_HIST_D'].shift(1)
 
-# Weekly MACD Histogram (forward-filled)
 macd_weekly = ta.trend.MACD(df['Close'].resample('W').last())
 macd_hist_w = macd_weekly.macd_diff().reindex(df.index, method='ffill')
 df['MACD_HIST_W'] = macd_hist_w
 df['MACD_HIST_W_prev'] = df['MACD_HIST_W'].shift(1)
 
-# ATR using close-only data (since no High/Low)
 df['ATR'] = ta.volatility.AverageTrueRange(
     high=df['Close'], low=df['Close'], close=df['Close'], window=14
 ).average_true_range()
 
-# === Step 3: Define Score-Based Entry Signal ===
 def get_score(row):
     score = 0
     if row['EMA_13_D'] > row['EMA_13_D_prev']: score += 1
@@ -44,7 +36,7 @@ def get_score(row):
 
 df['Score'] = df.apply(get_score, axis=1)
 
-# === Step 4: Backtest Logic ===
+
 trades = []
 in_trade = False
 entry_price = stop_price = shares = 0
@@ -54,7 +46,6 @@ for i in range(1, len(df)):
     today = df.iloc[i]
     yesterday = df.iloc[i - 1]
 
-    # === ENTRY ===
     if not in_trade and yesterday['Score'] < 4 and today['Score'] == 4:
         entry_price = today['Close']
         atr = today['ATR']
@@ -64,11 +55,10 @@ for i in range(1, len(df)):
         if risk_per_share < 1e-6:
             continue
 
-        shares = int((0.01 * bank) / risk_per_share)  # 1% risk model
+        shares = int((0.01 * bank) / risk_per_share)  
         in_trade = True
         entry_date = df.index[i]
 
-    # === EXIT: Score Drop ===
     elif in_trade and today['Score'] <= 2:
         exit_price = today['Close']
         pl = (exit_price - entry_price) * shares
@@ -90,7 +80,6 @@ for i in range(1, len(df)):
 
         in_trade = False
 
-    # === EXIT: Stop Loss ===
     elif in_trade and today['Close'] < stop_price:
         exit_price = stop_price
         pl = (exit_price - entry_price) * shares
@@ -111,16 +100,13 @@ for i in range(1, len(df)):
 
         in_trade = False
 
-# === Step 5: Summary Stats ===
 results = pd.DataFrame(trades)
 
-# Avg days held for wins/losses
 win_days = results[results['P/L'] > 0]['Days Held']
 loss_days = results[results['P/L'] <= 0]['Days Held']
 avg_days_win = win_days.mean() if not win_days.empty else 0
 avg_days_loss = loss_days.mean() if not loss_days.empty else 0
 
-# Final summary
 summary = {
     "Total Trades": len(results),
     "Win Rate": (results['P/L'] > 0).mean(),
